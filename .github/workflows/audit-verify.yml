@@ -1,0 +1,41 @@
+name: Independent pinned Dedekind Lean audit
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+      - name: Install elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Checkout exact audited source
+        run: |
+          git init --quiet work/source
+          git -C work/source remote add origin https://github.com/AxiomMath/DedekindZetaZeroFree.git
+          git -C work/source fetch --quiet --depth=1 origin 201bc4080da1d89405a2bcd43df88cca1e7e300c
+          git -C work/source checkout --quiet --detach FETCH_HEAD
+          test "$(git -C work/source rev-parse HEAD)" = 201bc4080da1d89405a2bcd43df88cca1e7e300c
+      - name: Build pinned library, challenge and solution
+        working-directory: work/source
+        run: |
+          lake exe cache get
+          lake build
+      - name: Check exact statement and axioms
+        working-directory: work/source
+        run: |
+          lake env lean "$GITHUB_WORKSPACE/.github/lean/AuditScope.lean" | tee audit_scope.out
+          grep -q 'AUDIT_SCOPE=passed' audit_scope.out
+          ! grep -q sorryAx audit_scope.out
+      - name: Replay capstone through Lean kernel
+        working-directory: work/source
+        run: lake env leanchecker -v DedekindZetaZeroFree.Main
